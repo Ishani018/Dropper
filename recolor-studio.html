@@ -104,6 +104,7 @@
   .note{font-size:12.5px;color:var(--muted);line-height:1.5;margin-top:14px;}
   .meta{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.5;word-break:break-all;}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/mp4-muxer@3/build/mp4-muxer.min.js"></script>
 </head>
 <body>
 <div class="app">
@@ -120,7 +121,7 @@
           <b>Drop a video here</b>
           <span>MP4 with a flat background, or transparent WebM</span>
           <button class="pill" id="pickBtn">Choose file</button>
-          <input type="file" id="file" accept="video/*" hidden>
+          <input type="file" id="file" accept=".mp4,.webm,.mov,.m4v,.mkv,video/*" hidden>
         </div>
         <div class="hint">click the video to eyedrop the old color</div>
       </div>
@@ -161,6 +162,14 @@
         <div class="slider-row"><input type="range" id="soft" min="0" max="20" value="6"><output id="softOut">6</output></div>
       </div>
 
+      <div class="row">
+        <label>Export speed</label>
+        <div class="toggle">
+          <button id="spdTurbo" class="on">Turbo · 2fps</button>
+          <button id="spdReal">Real-time · 30fps</button>
+        </div>
+      </div>
+
       <div class="actions">
         <button class="btn primary" id="exportBtn" disabled>Export video</button>
         <button class="btn ghost" id="replayBtn" disabled>Replay preview</button>
@@ -171,7 +180,7 @@
         <span id="progText">Exporting…</span>
       </div>
 
-      <p class="note">Export runs in real time — a 25:00 video takes 25:00 to record. Keep this tab open and visible. Short character loops finish in seconds.</p>
+      <p class="note"><b>Turbo</b> samples 2 frames per second and encodes with your GPU — a 25:00 timer exports in ~1–2 minutes. Perfect for timers and anything that changes slowly. Use <b>Real-time</b> for smooth motion (character loops, footage); it records at 30fps and takes as long as the video runs.</p>
     </div>
   </div>
 </div>
@@ -255,9 +264,20 @@
   }
 
   // ---------- load ----------
+  function fmtDur(d){
+    if (!isFinite(d)) return '–:–';
+    return Math.floor(d/60) + ':' + String(Math.floor(d%60)).padStart(2,'0');
+  }
   function loadFile(f){
-    if (!f || !f.type.startsWith('video')) return;
+    if (!f) return;
+    // Windows often reports an empty MIME type for .webm — accept by extension too
+    const looksVideo = f.type.startsWith('video') || /\.(mp4|webm|mov|m4v|mkv)$/i.test(f.name);
+    if (!looksVideo){ meta.textContent = '"' + f.name + '" doesn\'t look like a video file.'; return; }
     fileName = f.name.replace(/\.[^.]+$/, '');
+    meta.textContent = 'Loading ' + f.name + '…';
+    video.onerror = () => {
+      meta.textContent = 'Couldn\'t decode "' + f.name + '" — this browser may not support its codec. Try Chrome or Edge.';
+    };
     video.src = URL.createObjectURL(f);
     video.onloadedmetadata = () => {
       canvas.width = video.videoWidth; canvas.height = video.videoHeight;
@@ -267,7 +287,7 @@
       // guess mode from extension
       setMode(/\.webm$/i.test(f.name) ? 'alpha' : 'flat');
       meta.textContent = f.name + ' · ' + video.videoWidth + '×' + video.videoHeight +
-        ' · ' + Math.floor(video.duration/60) + ':' + String(Math.floor(video.duration%60)).padStart(2,'0');
+        ' · ' + fmtDur(video.duration);
       video.play();
       loop();
     };
@@ -332,34 +352,164 @@
   // ---------- export ----------
   const progWrap = document.getElementById('prog'), progBar = document.getElementById('progBar'), progText = document.getElementById('progText');
 
-  exportBtn.onclick = () => {
-    if (!loaded || exporting) return;
-    exporting = true;
-    exportBtn.disabled = true;
-    progWrap.classList.add('on');
+  // ---------- export speed toggle ----------
+  let speed = 'turbo';
+  const spdTurbo = document.getElementById('spdTurbo'), spdReal = document.getElementById('spdReal');
+  function setSpeed(s){
+    speed = s;
+    spdTurbo.classList.toggle('on', s === 'turbo');
+    spdReal.classList.toggle('on', s === 'real');
+  }
+  spdTurbo.onclick = () => setSpeed('turbo');
+  spdReal.onclick = () => setSpeed('real');
 
+  // ---------- turbo export: seek + WebCodecs encode, much faster than real time ----------
+  const turboSupported = () =>
+    typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined' && window.Mp4Muxer;
+
+  function seekTo(t){
+    return new Promise(res => {
+      const done = () => { video.removeEventListener('seeked', done); res(); };
+      video.addEventListener('seeked', done);
+      video.currentTime = t;
+    });
+  }
+
+  async function turboExport(outName){
+    const SAMPLE_FPS = 2;
+    const W2 = canvas.width - (canvas.width % 2);   // encoders need even dims
+    const H2 = canvas.height - (canvas.height % 2);
+    const codec = 'avc1.420028'; // H.264 baseline, level 4 (1080p)
+
+    const support = await VideoEncoder.isConfigSupported({codec, width: W2, height: H2});
+    if (!support.supported) throw new Error('encoder-unsupported');
+
+    const target = new Mp4Muxer.ArrayBufferTarget();
+    const muxer = new Mp4Muxer.Muxer({
+      target,
+      video: {codec: 'avc', width: W2, height: H2},
+      fastStart: 'in-memory',
+      firstTimestampBehavior: 'offset'
+    });
+    const encoder = new VideoEncoder({
+      output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+      error: e => console.error(e)
+    });
+    encoder.configure({codec, width: W2, height: H2, bitrate: 1_500_000, framerate: SAMPLE_FPS});
+
+    video.pause();
+    const dur = video.duration;
+    const total = Math.floor(dur * SAMPLE_FPS);
+    const stepUs = Math.round(1e6 / SAMPLE_FPS);
+
+    for (let i = 0; i < total; i++){
+      if (!exporting) break; // cancelled
+      await seekTo(i / SAMPLE_FPS);
+      draw();
+      const frame = new VideoFrame(canvas, {timestamp: i * stepUs, duration: stepUs});
+      encoder.encode(frame, {keyFrame: i % 120 === 0});
+      frame.close();
+      if (encoder.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 15));
+      if (i % 10 === 0){
+        const pct = i / total * 100;
+        progBar.style.width = pct.toFixed(1) + '%';
+        progText.textContent = 'Turbo export… ' + pct.toFixed(0) + '%';
+        await new Promise(r => setTimeout(r, 0)); // keep UI alive
+      }
+    }
+    await encoder.flush();
+    muxer.finalize();
+
+    const blob = new Blob([target.buffer], {type: 'video/mp4'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = outName;
+    a.click();
+  }
+
+  exportBtn.onclick = async () => {
+    if (!loaded || exporting) return;
+
+    // ---- turbo path ----
+    if (speed === 'turbo'){
+      if (!turboSupported()){
+        progWrap.classList.add('on');
+        progText.textContent = 'Turbo needs Chrome/Edge (WebCodecs) — falling back to real-time.';
+      } else {
+        exporting = true;
+        exportBtn.disabled = true;
+        progWrap.classList.add('on');
+        try {
+          await turboExport(fileName + '_' + newColor.value.slice(1) + '_turbo.mp4');
+          progText.textContent = 'Done — check your downloads.';
+        } catch(e){
+          console.error(e);
+          progText.textContent = 'Turbo failed (' + (e.message || e) + ') — try Real-time mode.';
+        }
+        exporting = false;
+        exportBtn.disabled = false;
+        video.loop = true; video.play();
+        setTimeout(() => progWrap.classList.remove('on'), 5000);
+        return;
+      }
+    }
+
+    // ---- real-time path ----
     const types = [
       'video/mp4;codecs=avc1', 'video/mp4',
       'video/webm;codecs=vp9', 'video/webm'
     ];
     const mime = types.find(t => MediaRecorder.isTypeSupported(t)) || 'video/webm';
     const ext = mime.startsWith('video/mp4') ? 'mp4' : 'webm';
+    const outName = fileName + '_' + newColor.value.slice(1) + '.' + ext;
+
+    // Long videos: stream straight to disk so memory never fills up.
+    // (File System Access API — Chrome/Edge. Falls back to in-memory for short clips.)
+    let writable = null, chunks = [], writeQueue = Promise.resolve();
+    if ('showSaveFilePicker' in window && (video.duration > 120 || !isFinite(video.duration))){
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: outName,
+          types: [{description: 'Video', accept: {[mime.split(';')[0]]: ['.' + ext]}}]
+        });
+        writable = await handle.createWritable();
+      } catch(e){ return; /* user cancelled the save dialog */ }
+    }
+
+    exporting = true;
+    exportBtn.disabled = true;
+    progWrap.classList.add('on');
+
+    // Keep drawing even when the tab is backgrounded (rAF throttles there).
+    // A 1s interval in a hidden tab still captures the timer's once-per-second changes.
+    const bgDraw = setInterval(draw, 250);
 
     const stream = canvas.captureStream(30);
-    const rec = new MediaRecorder(stream, {mimeType: mime, videoBitsPerSecond: 8_000_000});
-    const chunks = [];
-    rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
-    rec.onstop = () => {
-      const blob = new Blob(chunks, {type: mime});
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = fileName + '_' + newColor.value.slice(1) + '.' + ext;
-      a.click();
+    const rec = new MediaRecorder(stream, {mimeType: mime, videoBitsPerSecond: 3_000_000});
+    rec.ondataavailable = e => {
+      if (!e.data.size) return;
+      if (writable) writeQueue = writeQueue.then(() => writable.write(e.data));
+      else chunks.push(e.data);
+    };
+    rec.onstop = async () => {
+      clearInterval(bgDraw);
+      if (writable){
+        await writeQueue;
+        await writable.close();
+        progText.textContent = 'Done — saved to the file you chose.';
+      } else {
+        const blob = new Blob(chunks, {type: mime});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = outName;
+        a.click();
+        progText.textContent = 'Done — check your downloads.';
+      }
+      chunks = [];
       exporting = false;
       exportBtn.disabled = false;
       video.loop = true; video.play();
-      progText.textContent = 'Done — check your downloads.';
-      setTimeout(() => progWrap.classList.remove('on'), 4000);
+      setTimeout(() => progWrap.classList.remove('on'), 5000);
     };
 
     video.loop = false;
@@ -369,9 +519,10 @@
       if (!exporting){ clearInterval(tick); return; }
       const pct = video.duration ? (video.currentTime / video.duration * 100) : 0;
       progBar.style.width = pct.toFixed(1) + '%';
-      progText.textContent = 'Exporting ' + ext.toUpperCase() + '… ' + pct.toFixed(0) + '%';
+      progText.textContent = 'Exporting ' + ext.toUpperCase() + '… ' + pct.toFixed(0) + '%' +
+        (document.hidden ? ' (tab hidden — still going)' : '');
     }, 400);
-    video.play().then(() => rec.start(1000));
+    video.play().then(() => rec.start(2000));
   };
 })();
 </script>
