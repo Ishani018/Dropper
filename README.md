@@ -1,4 +1,4 @@
-# 🎨 Dropper
+# Dropper
 
 Change a video's background color right in your browser. No installs, no uploads, no accounts — Dropper is a single HTML file. Open it, drop a video in, click the old color, pick a new one, export. Everything runs locally on your machine.
 
