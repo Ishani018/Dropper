@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Recolor Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FBF7F2; --ink:#2B2530; --muted:#8A8092;
+    --lilac:#CDA9E8; --pink:#E85D8A; --card:#FFFFFF;
+    --line:rgba(43,37,48,.12);
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{
+    font-family:'Outfit',sans-serif;background:var(--paper);color:var(--ink);
+    min-height:100vh;padding:34px 20px 60px;
+  }
+  .app{max-width:1060px;margin:0 auto;}
+  header h1{font-family:'Fredoka',sans-serif;font-weight:600;font-size:clamp(24px,4vw,34px);}
+  header p{color:var(--muted);margin-top:6px;font-size:14.5px;max-width:60ch;line-height:1.55;}
+
+  .grid{display:grid;grid-template-columns:1fr 320px;gap:22px;margin-top:26px;}
+  @media(max-width:880px){.grid{grid-template-columns:1fr;}}
+
+  /* ---- preview ---- */
+  .stage{
+    position:relative;border-radius:16px;overflow:hidden;
+    background:
+      linear-gradient(45deg,#e8e2d8 25%,transparent 25%,transparent 75%,#e8e2d8 75%),
+      linear-gradient(45deg,#e8e2d8 25%,#f4efe6 25%,#f4efe6 75%,#e8e2d8 75%);
+    background-size:28px 28px;background-position:0 0,14px 14px;
+    box-shadow:0 6px 26px rgba(43,37,48,.12);
+    aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;
+  }
+  .stage canvas{max-width:100%;max-height:100%;display:block;cursor:crosshair;}
+  .stage .drop{
+    position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;
+    align-items:center;justify-content:center;text-align:center;color:var(--muted);
+    font-size:15px;padding:20px;
+  }
+  .drop b{font-family:'Fredoka',sans-serif;font-weight:600;color:var(--ink);font-size:19px;}
+  .drop .pill{
+    margin-top:6px;background:var(--ink);color:#fff;border:none;border-radius:999px;
+    padding:10px 22px;font-family:inherit;font-size:14px;font-weight:500;cursor:pointer;
+  }
+  .stage.dragover{outline:3px dashed var(--pink);outline-offset:-8px;}
+  .stage .hint{
+    position:absolute;left:12px;bottom:10px;background:rgba(43,37,48,.78);color:#fff;
+    font-size:12px;padding:6px 12px;border-radius:999px;display:none;
+  }
+  .stage.loaded .hint{display:block;}
+  .stage.loaded .drop{display:none;}
+
+  /* ---- controls ---- */
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;}
+  .panel h2{font-family:'Fredoka',sans-serif;font-weight:600;font-size:15px;margin-bottom:14px;}
+  .row{margin-bottom:16px;}
+  label{display:block;font-size:12.5px;font-weight:600;letter-spacing:.04em;color:var(--muted);margin-bottom:7px;text-transform:uppercase;}
+
+  .chips{display:flex;align-items:center;gap:12px;}
+  .chip{
+    width:52px;height:52px;border-radius:50%;border:3px solid #fff;
+    box-shadow:0 0 0 1px var(--line),0 3px 8px rgba(43,37,48,.15);
+    position:relative;flex:none;
+  }
+  .chip input[type=color]{
+    position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;
+  }
+  .arrow{font-size:20px;color:var(--muted);}
+  .hexes{display:flex;flex-direction:column;gap:6px;flex:1;min-width:0;}
+  .hexes input{
+    width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:9px;
+    font-family:inherit;font-size:13px;text-transform:uppercase;
+  }
+
+  .slider-row{display:flex;align-items:center;gap:10px;}
+  .slider-row input[type=range]{flex:1;accent-color:var(--pink);}
+  .slider-row output{font-size:12.5px;color:var(--muted);width:34px;text-align:right;}
+
+  .toggle{display:flex;gap:8px;}
+  .toggle button{
+    flex:1;padding:9px 6px;border-radius:10px;border:1px solid var(--line);
+    background:#fff;font-family:inherit;font-size:12.5px;font-weight:500;cursor:pointer;color:var(--muted);
+  }
+  .toggle button.on{background:var(--ink);color:#fff;border-color:var(--ink);}
+
+  .actions{display:flex;flex-direction:column;gap:10px;margin-top:4px;}
+  .btn{
+    padding:13px;border-radius:12px;border:none;font-family:'Fredoka',sans-serif;
+    font-weight:600;font-size:15px;cursor:pointer;
+  }
+  .btn.primary{background:var(--pink);color:#fff;}
+  .btn.primary:disabled{background:#e9c2cf;cursor:not-allowed;}
+  .btn.ghost{background:none;border:1px solid var(--line);color:var(--ink);font-family:'Outfit',sans-serif;font-weight:500;font-size:13.5px;padding:10px;}
+
+  .progress{display:none;margin-top:6px;}
+  .progress.on{display:block;}
+  .progress .bar{height:8px;border-radius:4px;background:rgba(43,37,48,.1);overflow:hidden;}
+  .progress .bar i{display:block;height:100%;width:0%;background:var(--pink);border-radius:4px;transition:width .3s;}
+  .progress span{font-size:12px;color:var(--muted);display:block;margin-top:6px;}
+
+  .note{font-size:12.5px;color:var(--muted);line-height:1.5;margin-top:14px;}
+  .meta{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.5;word-break:break-all;}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Recolor Studio</h1>
+    <p>Drop in a timer or character video, click its background in the preview to pick the old color, choose a new one, and export. Works with flat-background MP4s and transparent WebMs. Use Chrome or Edge.</p>
+  </header>
+
+  <div class="grid">
+    <div>
+      <div class="stage" id="stage">
+        <canvas id="gl" width="1920" height="1080"></canvas>
+        <div class="drop">
+          <b>Drop a video here</b>
+          <span>MP4 with a flat background, or transparent WebM</span>
+          <button class="pill" id="pickBtn">Choose file</button>
+          <input type="file" id="file" accept="video/*" hidden>
+        </div>
+        <div class="hint">click the video to eyedrop the old color</div>
+      </div>
+      <div class="meta" id="meta"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Recolor</h2>
+
+      <div class="row">
+        <label>Video type</label>
+        <div class="toggle">
+          <button id="modeFlat" class="on">Flat background</button>
+          <button id="modeAlpha">Transparent</button>
+        </div>
+      </div>
+
+      <div class="row" id="colorRow">
+        <label>Old → new background</label>
+        <div class="chips">
+          <div class="chip" id="oldChip" style="background:#CDA9E8"><input type="color" id="oldColor" value="#CDA9E8"></div>
+          <div class="arrow">→</div>
+          <div class="chip" id="newChip" style="background:#F4D8A8"><input type="color" id="newColor" value="#F4D8A8"></div>
+          <div class="hexes">
+            <input id="oldHex" value="#CDA9E8" spellcheck="false">
+            <input id="newHex" value="#F4D8A8" spellcheck="false">
+          </div>
+        </div>
+      </div>
+
+      <div class="row" id="tolRow">
+        <label>Tolerance</label>
+        <div class="slider-row"><input type="range" id="tol" min="1" max="40" value="12"><output id="tolOut">12</output></div>
+      </div>
+
+      <div class="row" id="softRow">
+        <label>Edge softness</label>
+        <div class="slider-row"><input type="range" id="soft" min="0" max="20" value="6"><output id="softOut">6</output></div>
+      </div>
+
+      <div class="actions">
+        <button class="btn primary" id="exportBtn" disabled>Export video</button>
+        <button class="btn ghost" id="replayBtn" disabled>Replay preview</button>
+      </div>
+
+      <div class="progress" id="prog">
+        <div class="bar"><i id="progBar"></i></div>
+        <span id="progText">Exporting…</span>
+      </div>
+
+      <p class="note">Export runs in real time — a 25:00 video takes 25:00 to record. Keep this tab open and visible. Short character loops finish in seconds.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const stage = document.getElementById('stage');
+  const canvas = document.getElementById('gl');
+  const fileInput = document.getElementById('file');
+  const meta = document.getElementById('meta');
+  const exportBtn = document.getElementById('exportBtn');
+  const replayBtn = document.getElementById('replayBtn');
+
+  const video = document.createElement('video');
+  video.muted = true; video.playsInline = true; video.loop = true;
+
+  let mode = 'flat';   // 'flat' | 'alpha'
+  let loaded = false, exporting = false, fileName = 'video';
+
+  // ---------- WebGL ----------
+  const gl = canvas.getContext('webgl', {preserveDrawingBuffer:true, alpha:false, antialias:false});
+  const vs = `attribute vec2 p; varying vec2 uv;
+    void main(){ uv = vec2(p.x*.5+.5, .5-p.y*.5); gl_Position = vec4(p,0.,1.); }`;
+  const fs = `precision mediump float;
+    varying vec2 uv; uniform sampler2D tex;
+    uniform vec3 oldC; uniform vec3 newC;
+    uniform float tol; uniform float soft; uniform float mode;
+    void main(){
+      vec4 c = texture2D(tex, uv);
+      if (mode > 0.5){
+        gl_FragColor = vec4(mix(newC, c.rgb, c.a), 1.0);
+      } else {
+        float d = distance(c.rgb, oldC);
+        float k = smoothstep(tol, tol + soft + 0.0001, d); // 0 = bg, 1 = keep
+        gl_FragColor = vec4(mix(newC, c.rgb, k), 1.0);
+      }
+    }`;
+  function shader(type, src){
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s;
+  }
+  const prog = gl.createProgram();
+  gl.attachShader(prog, shader(gl.VERTEX_SHADER, vs));
+  gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(prog); gl.useProgram(prog);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, 'p');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  const U = n => gl.getUniformLocation(prog, n);
+
+  function hexToVec(h){
+    h = h.replace('#','');
+    return [parseInt(h.slice(0,2),16)/255, parseInt(h.slice(2,4),16)/255, parseInt(h.slice(4,6),16)/255];
+  }
+
+  function draw(){
+    if (!loaded) return;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video); } catch(e){}
+    gl.uniform3fv(U('oldC'), hexToVec(oldColor.value));
+    gl.uniform3fv(U('newC'), hexToVec(newColor.value));
+    gl.uniform1f(U('tol'), tol.value / 100);
+    gl.uniform1f(U('soft'), soft.value / 100);
+    gl.uniform1f(U('mode'), mode === 'alpha' ? 1 : 0);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  function loop(){
+    draw();
+    if ('requestVideoFrameCallback' in video) video.requestVideoFrameCallback(loop);
+    else requestAnimationFrame(loop);
+  }
+
+  // ---------- load ----------
+  function loadFile(f){
+    if (!f || !f.type.startsWith('video')) return;
+    fileName = f.name.replace(/\.[^.]+$/, '');
+    video.src = URL.createObjectURL(f);
+    video.onloadedmetadata = () => {
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      loaded = true;
+      stage.classList.add('loaded');
+      exportBtn.disabled = false; replayBtn.disabled = false;
+      // guess mode from extension
+      setMode(/\.webm$/i.test(f.name) ? 'alpha' : 'flat');
+      meta.textContent = f.name + ' · ' + video.videoWidth + '×' + video.videoHeight +
+        ' · ' + Math.floor(video.duration/60) + ':' + String(Math.floor(video.duration%60)).padStart(2,'0');
+      video.play();
+      loop();
+    };
+  }
+  document.getElementById('pickBtn').onclick = () => fileInput.click();
+  fileInput.onchange = e => loadFile(e.target.files[0]);
+  ;['dragover','dragleave','drop'].forEach(ev => stage.addEventListener(ev, e => {
+    e.preventDefault();
+    stage.classList.toggle('dragover', ev === 'dragover');
+    if (ev === 'drop') loadFile(e.dataTransfer.files[0]);
+  }));
+
+  // ---------- eyedropper ----------
+  canvas.addEventListener('click', e => {
+    if (!loaded || mode === 'alpha' || exporting) return;
+    const r = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - r.left) / r.width * canvas.width);
+    const y = Math.floor((e.clientY - r.top) / r.height * canvas.height);
+    // read from the raw video frame, not the recolored output
+    const tmp = document.createElement('canvas');
+    tmp.width = canvas.width; tmp.height = canvas.height;
+    const c2 = tmp.getContext('2d');
+    c2.drawImage(video, 0, 0);
+    const px = c2.getImageData(x, y, 1, 1).data;
+    const hex = '#' + [px[0],px[1],px[2]].map(v => v.toString(16).padStart(2,'0')).join('').toUpperCase();
+    setColor('old', hex);
+  });
+
+  // ---------- controls ----------
+  const oldColor = document.getElementById('oldColor'), newColor = document.getElementById('newColor');
+  const oldHex = document.getElementById('oldHex'), newHex = document.getElementById('newHex');
+  const oldChip = document.getElementById('oldChip'), newChip = document.getElementById('newChip');
+  const tol = document.getElementById('tol'), soft = document.getElementById('soft');
+
+  function setColor(which, hex){
+    if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return;
+    hex = hex.toUpperCase();
+    (which === 'old' ? oldColor : newColor).value = hex;
+    (which === 'old' ? oldHex : newHex).value = hex;
+    (which === 'old' ? oldChip : newChip).style.background = hex;
+  }
+  oldColor.oninput = () => setColor('old', oldColor.value);
+  newColor.oninput = () => setColor('new', newColor.value);
+  oldHex.onchange = () => setColor('old', oldHex.value.startsWith('#') ? oldHex.value : '#' + oldHex.value);
+  newHex.onchange = () => setColor('new', newHex.value.startsWith('#') ? newHex.value : '#' + newHex.value);
+  tol.oninput = () => document.getElementById('tolOut').value = tol.value;
+  soft.oninput = () => document.getElementById('softOut').value = soft.value;
+
+  const modeFlat = document.getElementById('modeFlat'), modeAlpha = document.getElementById('modeAlpha');
+  function setMode(m){
+    mode = m;
+    modeFlat.classList.toggle('on', m === 'flat');
+    modeAlpha.classList.toggle('on', m === 'alpha');
+    document.getElementById('tolRow').style.opacity = m === 'alpha' ? .35 : 1;
+    document.getElementById('softRow').style.opacity = m === 'alpha' ? .35 : 1;
+  }
+  modeFlat.onclick = () => setMode('flat');
+  modeAlpha.onclick = () => setMode('alpha');
+
+  replayBtn.onclick = () => { video.currentTime = 0; video.play(); };
+
+  // ---------- export ----------
+  const progWrap = document.getElementById('prog'), progBar = document.getElementById('progBar'), progText = document.getElementById('progText');
+
+  exportBtn.onclick = () => {
+    if (!loaded || exporting) return;
+    exporting = true;
+    exportBtn.disabled = true;
+    progWrap.classList.add('on');
+
+    const types = [
+      'video/mp4;codecs=avc1', 'video/mp4',
+      'video/webm;codecs=vp9', 'video/webm'
+    ];
+    const mime = types.find(t => MediaRecorder.isTypeSupported(t)) || 'video/webm';
+    const ext = mime.startsWith('video/mp4') ? 'mp4' : 'webm';
+
+    const stream = canvas.captureStream(30);
+    const rec = new MediaRecorder(stream, {mimeType: mime, videoBitsPerSecond: 8_000_000});
+    const chunks = [];
+    rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    rec.onstop = () => {
+      const blob = new Blob(chunks, {type: mime});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = fileName + '_' + newColor.value.slice(1) + '.' + ext;
+      a.click();
+      exporting = false;
+      exportBtn.disabled = false;
+      video.loop = true; video.play();
+      progText.textContent = 'Done — check your downloads.';
+      setTimeout(() => progWrap.classList.remove('on'), 4000);
+    };
+
+    video.loop = false;
+    video.currentTime = 0;
+    video.onended = () => { if (exporting) rec.stop(); video.onended = null; };
+    const tick = setInterval(() => {
+      if (!exporting){ clearInterval(tick); return; }
+      const pct = video.duration ? (video.currentTime / video.duration * 100) : 0;
+      progBar.style.width = pct.toFixed(1) + '%';
+      progText.textContent = 'Exporting ' + ext.toUpperCase() + '… ' + pct.toFixed(0) + '%';
+    }, 400);
+    video.play().then(() => rec.start(1000));
+  };
+})();
+</script>
+</body>
+</html>
